@@ -34,17 +34,19 @@ typedef struct ThreadData {
 } ThreadData;
 
 /* PROTOTYPES */
-uint8_t GetArraySizeFromUser();
+uint_fast8_t GetArraySizeFromUser();
 
 void SetArrayRangesByArraySize(ThreadData *firstThread, ThreadData *secondThread, uint8_t *arraySize);
 
 void ThreadDetails(ThreadData *threadData);
 
-void FeedArrayWithInt(uint8_t arraySize, int *array);
+void FeedArrayWithInt(uint_fast8_t arraySize, int *array);
 
-void ArrayDetails(const int *array, uint_fast8_t arraySize);
+void ArrayDetails(int *array, uint_fast8_t arraySize);
 
-bool NumberAlreadyInArray(const int *array, uint_fast8_t arraySize, int number);
+bool NumberAlreadyInArray(int *array, uint_fast8_t arraySize, int number);
+
+void DeallocateResources(ThreadData *threadData);
 /* END OF PROTOTYPES */
 
 int main(void)
@@ -64,16 +66,18 @@ int main(void)
         .array = NULL
         };
 
-        uint8_t arraySize = GetArraySizeFromUser();
+        uint_fast8_t arraySize = GetArraySizeFromUser();
         SetArrayRangesByArraySize(&firstThread, &secondThread, &arraySize);
-        ThreadDetails(&firstThread);
-        ThreadDetails(&secondThread);
-
         int array[(size_t) arraySize];
         memset(array, 0, arraySize);
         FeedArrayWithInt(arraySize, array); 
-        ArrayDetails(array, (uint_fast8_t) arraySize);
-
+        ArrayDetails(array, arraySize);
+        firstThread.array = array;
+        secondThread.array = array;
+        ThreadDetails(&firstThread);
+        ThreadDetails(&secondThread);
+        DeallocateResources(&firstThread);
+        DeallocateResources(&secondThread);
         return EXIT_SUCCESS;
 }
 
@@ -84,7 +88,7 @@ int main(void)
  * It have a max integer size, defined by UINT8_MAX (255). If something goes wrong
  * (i.e: fully dirty input or value overflows UINT8_MAX), the program will break.
 */
-uint8_t GetArraySizeFromUser() 
+uint_fast8_t GetArraySizeFromUser(void) 
 {
         int convertedResult = 0;
         char rawUserInput[RESPONSE_MAX_SIZE] = "\0";
@@ -105,7 +109,7 @@ uint8_t GetArraySizeFromUser()
                 exit(EXIT_FAILURE);
         }
 
-        return (uint8_t) convertedResult;
+        return (uint_fast8_t) convertedResult;
 }
 
 /* SetArrayRangesByArraySize - Configure Threads range by given array size
@@ -119,19 +123,16 @@ uint8_t GetArraySizeFromUser()
 void SetArrayRangesByArraySize(ThreadData *firstThread, ThreadData *secondThread, uint8_t *arraySize) 
 {
         uint8_t middleIndex = (uint8_t) round((double)(*arraySize) / 2);
+        ArrayRange *fRange = (struct ArrayRange*) malloc(sizeof(ArrayRange));
+        ArrayRange *sRange = (struct ArrayRange*) malloc(sizeof(ArrayRange));
+        fRange->startIndex = 0;
+        fRange->endIndex = middleIndex;
 
-        ArrayRange firstThreadRange = {
-        .startIndex = 0,
-        .endIndex = middleIndex
-        };
+        sRange->startIndex = middleIndex + 1;
+        sRange->endIndex = (*arraySize) - 1;
 
-        ArrayRange secondThreadRange = {
-        .startIndex = middleIndex + 1,
-        .endIndex = (*arraySize) - 1
-        };
-
-        firstThread->range = &firstThreadRange;
-        secondThread->range = &secondThreadRange;
+        firstThread->range = fRange;
+        secondThread->range = sRange;
 }
 
 
@@ -142,14 +143,14 @@ void SetArrayRangesByArraySize(ThreadData *firstThread, ThreadData *secondThread
  * This function inserts unique random integers to some int array.
  * The range of values is always from 0 to arraySize - 1.
 */
-void FeedArrayWithInt(uint8_t arraySize, int *array)
+void FeedArrayWithInt(uint_fast8_t arraySize, int *array)
 {
         srand(time(NULL));
         size_t iterations = 0;
-        for (uint8_t i = 0; i < arraySize; ++i) {
+        for (uint_fast8_t i = 0; i < arraySize; ++i) {
                 iterations++;
                 int randInt = rand() % arraySize;
-                if (NumberAlreadyInArray(array, (uint_fast8_t) arraySize, randInt)) {
+                if (NumberAlreadyInArray(array, arraySize, randInt)) {
                         i--;
                         continue;
                 }
@@ -158,7 +159,16 @@ void FeedArrayWithInt(uint8_t arraySize, int *array)
         printf("Generated unique integer array (%ld iterations)\n", iterations);
 }
 
-bool NumberAlreadyInArray(const int *array, uint_fast8_t arraySize, int number)
+
+/* NumberAlreadyInArray - Checks if a number is in the main array 
+ * @array: Pointer to the main array
+ * @arraySize: Size of the array 
+ * @number: Number being seek.
+ *
+ * This function seek one number over an array.
+ * If the number is found returns true, false otherwise.
+*/
+bool NumberAlreadyInArray(int *array, uint_fast8_t arraySize, int number)
 {
         for (uint_fast8_t i = 0; i < arraySize; ++i) {
                 if (array[i] == number) {
@@ -168,6 +178,12 @@ bool NumberAlreadyInArray(const int *array, uint_fast8_t arraySize, int number)
         return false;
 }
 
+/* ThreadDetails - Prints details of thread data 
+ * @threadData: Pointer to the Thread Data.
+ *
+ * This function prints range, array address pointer 
+ * and information about the ordenation of array. 
+*/
 void ThreadDetails(ThreadData *threadData) {
         printf("[THREAD %ld]\n", threadData->id);
         printf("\tRange: (%d .. %d) (INCLUSIVE)\n", threadData->range->startIndex, threadData->range->endIndex);
@@ -175,10 +191,29 @@ void ThreadDetails(ThreadData *threadData) {
         printf("\tArray ptr: %p\n", threadData->array);
 }
 
-void ArrayDetails(const int *array, uint_fast8_t arraySize)
+/* ThreadDetails - Prints details of array 
+ * @array: Pointer to the main array.
+ * @arraySize: size of the main array.
+ *
+ * This function prints all elements of main array. 
+*/
+void ArrayDetails(int *array, uint_fast8_t arraySize)
 {
         printf("[ ");
         for (uint_fast8_t i = 0; i < arraySize; ++i) {
                 printf("%d%s", array[i], i + 1 == arraySize? " ]\n": ", ");
+        }
+}
+
+/* DeallocateResources - Free Used Resources from Heap
+ * @threadData: Pointer to Thread Data.
+ *
+ * This function frees heap memory allocated by thread data variable.
+*/
+void DeallocateResources(ThreadData *threadData)
+{
+        printf("Cleaning resources used by thread %ld...\n", threadData->id);
+        if (threadData->range != NULL) {
+                free(threadData->range);
         }
 }
